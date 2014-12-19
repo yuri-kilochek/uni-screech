@@ -35,53 +35,53 @@ static struct fs_info *get_fs_info(struct super_block *sb) {
 
 static struct file_system_type fs_type;
 static struct super_operations s_op;
-static struct inode_operations dir_i_op;
-static struct file_operations dir_f_op;
-static struct inode_operations reg_i_op;
-static struct file_operations reg_f_op;
+static struct inode_operations dir_iop;
+static struct file_operations dir_op;
+static struct inode_operations reg_iop;
+static struct file_operations reg_op;
 
-static struct inode *make_inode(struct super_block *sb, const struct inode *parent, int mode) {
-    struct inode *child = new_inode(sb);
-    if (!child)
-        return ERR_PTR(-ENOMEM);
-
-    child->i_ino = get_next_ino();
-
-    inode_init_owner(child, parent, mode);
-
-    struct timespec ct = CURRENT_TIME;
-    child->i_ctime = ct;
-    child->i_mtime = ct;        
-    child->i_atime = ct;
-
-    switch (mode & S_IFMT) {
-    case S_IFREG:
-        child->i_op = &reg_i_op;
-        child->i_fop = &reg_f_op;
-        break;
-    case S_IFDIR:
-        child->i_op = &dir_i_op;
-        child->i_fop = &dir_f_op;
-            // directory inodes start off with i_nlink == 2 (for "." entry)
-        inc_nlink(child); 
-        break;
-    }
-
-    child->i_private = NULL;
-    
-    return child;
+static int open(struct inode *inode, struct file *file) {
+    file->private_data = inode->i_private;
+    LOG("open %s", (char*)inode->i_private);
+    return 0;
 }
 
+static ssize_t read(struct file *file, char __user *buffer, size_t size, loff_t *offset) {
+    LOG("read %s %d %d", (char*)file->private_data, (int)size, (int)*offset);
+    return 0;
+}
 
+static ssize_t write(struct file *file, const char __user *buffer, size_t size, loff_t *offset) {
+    LOG("write %s %d %d", (char*)file->private_data, (int)size, (int)*offset);
+    *offset += size;
+    return size;
+}
 
+static int release (struct inode *inode, struct file *file) {
+    LOG("release %s", (char*)inode->i_private);
+    return 0;
+}
 
-static char *get_dentry_path(struct dentry *dentry) {
+static struct file_operations reg_op = {
+    .open = open,
+    .read = read,
+    .write = write,
+    .release = release,
+//    .fsync = noop_fsync,
+};
+
+static struct inode_operations reg_iop = {
+//    .setattr = simple_setattr,
+//    .getattr = simple_getattr,
+};
+
+static char *get_path(struct dentry *dentry) {
     int len = 256;
     for (;;) {
         char *buf = kmalloc(len, GFP_KERNEL);
         if (!buf)
             return ERR_PTR(-ENOMEM);
-        char *res = dentry_path_raw(dentry, buf, len);
+        char *res = dentry ? dentry_path_raw(dentry, buf, len) : strcpy(buf, "/");
         if (IS_ERR(res)) {
             kfree(buf);
             if (PTR_ERR(res) == -ENAMETOOLONG) {
@@ -95,131 +95,110 @@ static char *get_dentry_path(struct dentry *dentry) {
     }
 }
 
-
-//static struct dentry *lookup(struct inode *parent, struct dentry *dentry, struct nameidata *nd) {
-//    //struct fs_node *parent_node = parent->i_private;
-//
-//    char *path = get_dentry_path(dentry);
-//    if (IS_ERR(path)) {
-//        LOG("lookup get_dentry_path() failed");
-//    } else {
-//        LOG("lookup %s", path);
-//        kfree(path);
-//    }
-//
-//    //if (/* name in parent*/) {
-//     //   d_add(dentry, /* get inode for file name */);
-//    //} else {
-//        d_add(dentry, NULL);
-//    //}
-//
-//    return NULL;
-//}
-
-
-
-static int mkdir(struct inode *parent, struct dentry *dentry, int mode) {
-    struct inode *child = make_inode(parent->i_sb, parent, S_IFDIR | mode);
-    if (IS_ERR(child))
-        return PTR_ERR(child);
-    
-    d_instantiate(dentry, child);
-
-    dget(dentry);
-
-    struct timespec current_time = CURRENT_TIME;
-    parent->i_ctime = current_time;    
-    parent->i_mtime = current_time;    
-
-    inc_nlink(parent);
-    
-    char *path = get_dentry_path(dentry);
+static struct inode *make_inode(struct super_block *sb, struct inode *parent, struct dentry *dentry, int mode) {
+    char *path = get_path(dentry);
     if (IS_ERR(path)) {
-        LOG("mkdir get_dentry_path() failed");
-        return PTR_ERR(path);
-    } else {
-        LOG("mkdir %s", path);
-        kfree(path);
+        LOG("make_inode get_path() failed");
+        return ERR_CAST(path);
     }
+
+    struct inode *inode = new_inode(sb);
+    if (!inode) {
+        if (path)
+            kfree(path);
+        return ERR_PTR(-ENOMEM);
+    }
+
+    inode->i_ino = get_next_ino();
+    if (dentry) {
+        d_instantiate(dentry, inode);
+        dget(dentry);
+    }
+    if (parent)
+        inc_nlink(parent);
+
+    struct timespec ct = CURRENT_TIME;
+    inode->i_ctime = ct;
+    inode->i_mtime = ct;
+    inode->i_atime = ct;
+
+    inode_init_owner(inode, parent, mode);
+
+    switch (mode & S_IFMT) {
+    case S_IFREG:
+        inode->i_op = &reg_iop;
+        inode->i_fop = &reg_op;
+        break;
+    case S_IFDIR:
+        inode->i_op = &dir_iop;
+        inode->i_fop = &dir_op;
+            // directory inodes start off with i_nlink == 2 (for "." entry)
+        inc_nlink(inode);
+        break;
+    }
+
+    inode->i_private = path;
+    
+    return inode;
+}
+
+static int create(struct inode *dir, struct dentry *dentry, int mode, struct nameidata *nd) {
+    struct inode *inode = make_inode(dir->i_sb, dir, dentry, S_IFREG | mode);
+    if (IS_ERR(inode))
+        return PTR_ERR(inode);
+
+    LOG("create %s", (char*)inode->i_private);
+
+    return 0;
+}
+
+static int unlink(struct inode *dir, struct dentry *dentry) {
+    LOG("unlink %s", (char*)dentry->d_inode->i_private);
+    return simple_unlink(dir, dentry);
+}
+
+static int mkdir(struct inode *dir, struct dentry *dentry, int mode) {
+    struct inode *inode = make_inode(dir->i_sb, dir, dentry, S_IFDIR | mode);
+    if (IS_ERR(inode))
+        return PTR_ERR(inode);
+
+    LOG("mkdir %s", (char*)inode->i_private);
 
     return 0;
 }
 
 static int rmdir(struct inode *dir, struct dentry *dentry) {
-    int error = simple_rmdir(dir, dentry);
-
-    if (!error) {
-        char *path = get_dentry_path(dentry);
-        if (IS_ERR(path)) {
-            LOG("rmdir get_dentry_path(dentry) failed");
-            error = PTR_ERR(path);
-            goto exit;
-        }
-        LOG("rmdir %s", path);
-    exit:
-        if (path)
-            kfree(path);
-    }
-
-    return error;
+    LOG("unlink %s", (char*)dentry->d_inode->i_private);
+    return simple_rmdir(dir, dentry);
 }
 
 static int rename(struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry) {
-    int error = simple_rename(old_dir, old_dentry, new_dir, new_dentry);
-
-    if (!error) {
-        char* old_path = get_dentry_path(old_dentry);
-        if (IS_ERR(old_path)) {
-            LOG("rename get_dentry_path(old_dentry) failed");
-            error = PTR_ERR(old_path);
-            old_path = 0;
-            goto exit_old;
-        }
-        char* new_path = get_dentry_path(new_dentry);
-        if (IS_ERR(new_path)) {
-            LOG("rename get_dentry_path(new_dentry) failed");
-            error = PTR_ERR(new_path);
-            new_path = 0;
-            goto exit_new;
-        }
-        LOG("rename %s %s", old_path, new_path);
-    exit_new:
-        if (new_path)
-            kfree(new_path);
-    exit_old:
-        if (old_path)
-            kfree(old_path);
-    }
-
-    return error;
+    LOG("rename %s %s", (char*)old_dentry->d_inode->i_private, (char*)new_dentry->d_inode->i_private);
+    return simple_rename(old_dir, old_dentry, new_dir, new_dentry);
 }
 
-static struct file_operations dir_f_op = {
+static struct file_operations dir_op = {
     .open = dcache_dir_open,
     .release = dcache_dir_close,
     .llseek = dcache_dir_lseek,
     .read = generic_read_dir,
     .readdir = dcache_readdir,
-    .fsync = noop_fsync,
+//    .fsync = noop_fsync,
 };
 
-static struct inode_operations dir_i_op = {
-    .lookup = simple_lookup,
+static struct inode_operations dir_iop = {
+    .create = create,
+    .unlink = unlink,
     .mkdir = mkdir,
     .rmdir = rmdir,
     .rename = rename,
+    .lookup = simple_lookup,
 };
-
-
-
 
 static struct super_operations s_op = {
-    //.statfs = simple_statfs,
-    //.drop_inode = generic_delete_inode,
-    //.show_options = generic_show_options,
+//    .statfs = simple_statfs,
+//    .drop_inode = generic_delete_inode,
 };
-
-
 
 static int fill_super(struct super_block *sb, void *data, int silent) {
     struct mount_args *mount_args = data;
@@ -232,7 +211,7 @@ static int fill_super(struct super_block *sb, void *data, int silent) {
     sb->s_op = &s_op;
     sb->s_fs_info = mount_args;
 
-    struct inode *iroot = make_inode(sb, NULL, S_IFDIR | 0755);
+    struct inode *iroot = make_inode(sb, NULL, NULL, S_IFDIR | 0755);
     if (IS_ERR(iroot))
         return PTR_ERR(iroot);
         
