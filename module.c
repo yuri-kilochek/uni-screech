@@ -152,6 +152,12 @@ static int create(struct inode *dir, struct dentry *dentry, int mode, struct nam
     return 0;
 }
 
+static int unlink(struct inode *dir, struct dentry *dentry) {
+    LOG("unlink %s", (char*)dentry->d_inode->i_private);
+    return simple_unlink(dir, dentry);
+}
+
+
 static int mkdir(struct inode *dir, struct dentry *dentry, int mode) {
     struct inode *inode = make_inode(dir->i_sb, dir, dentry, S_IFDIR | mode);
     if (IS_ERR(inode))
@@ -162,21 +168,14 @@ static int mkdir(struct inode *dir, struct dentry *dentry, int mode) {
     return 0;
 }
 
-
-
-//static int rmdir(struct inode *dir, struct dentry *dentry) {
-//    LOG("unlink %s", (char*)dentry->d_inode->i_private);
-//    return simple_rmdir(dir, dentry);
-//}
+static int rmdir(struct inode *dir, struct dentry *dentry) {
+    LOG("rmdir %s", (char*)dentry->d_inode->i_private);
+    return simple_rmdir(dir, dentry);
+}
 
 static int rename(struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry) {
     LOG("rename %s %s", (char*)old_dentry->d_inode->i_private, (char*)new_dentry->d_inode->i_private);
     return simple_rename(old_dir, old_dentry, new_dir, new_dentry);
-}
-
-static int unlink(struct inode *dir, struct dentry *dentry) {
-    LOG("unlink %s", (char*)dentry->d_inode->i_private);
-    return simple_unlink(dir, dentry);
 }
 
 static struct file_operations dir_op = {
@@ -191,10 +190,10 @@ static struct file_operations dir_op = {
 static struct inode_operations dir_iop = {
     .lookup = simple_lookup,
     .create = create,
-    .mkdir = mkdir,
-//    .rmdir = rmdir,
-    .rename = rename,
     .unlink = unlink,
+    .mkdir = mkdir,
+    .rmdir = rmdir,
+    .rename = rename,
 };
 
 static struct super_operations s_op = {
