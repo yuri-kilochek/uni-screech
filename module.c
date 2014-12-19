@@ -18,7 +18,7 @@
 
 #define CACHE_PREFIX ".screech-cache."
 
-#define LOG(...) printk(KERN_INFO "SCREECH "__VA_ARGS__)
+#define LOG(...) printk(KERN_INFO "SCREECH " __VA_ARGS__)
 
 struct mount_args {
     char *container_path;
@@ -135,6 +135,25 @@ static int mkdir(struct inode *parent, struct dentry *dentry, int mode) {
     return 0;
 }
 
+static int rmdir(struct inode *dir, struct dentry *dentry) {
+    if (!simple_empty(dentry))
+        return -ENOTEMPTY;
+
+    drop_nlink(dentry->d_inode);
+    simple_unlink(dir, dentry);
+    drop_nlink(dir);
+
+    char *path = get_dentry_path(dentry);
+    if (IS_ERR(path)) {
+        LOG("get_dentry_path() failed");
+    } else {
+        LOG("rmdir %s", path);
+        kfree(path);
+    }
+
+    return 0;
+}
+
 static struct file_operations dir_f_op = {
     .open = dcache_dir_open,
     .release = dcache_dir_close,
@@ -147,7 +166,7 @@ static struct file_operations dir_f_op = {
 static struct inode_operations dir_i_op = {
     .lookup = simple_lookup,
     .mkdir = mkdir,
-    .rmdir = simple_rmdir,
+    .rmdir = rmdir,
     .rename = simple_rename,
 };
 
