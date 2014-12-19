@@ -169,13 +169,30 @@ static int mkdir(struct inode *dir, struct dentry *dentry, int mode) {
 }
 
 static int rmdir(struct inode *dir, struct dentry *dentry) {
-    LOG("rmdir %s", (char*)dentry->d_inode->i_private);
+    LOG("rmdir %s", (char *) dentry->d_inode->i_private);
     return simple_rmdir(dir, dentry);
 }
 
 static int rename(struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry) {
-    LOG("rename %s %s", (char*)old_dentry->d_inode->i_private, (char*)new_dentry->d_inode->i_private);
-    return simple_rename(old_dir, old_dentry, new_dir, new_dentry);
+    struct inode *inode = old_dentry->d_inode;
+
+    char* tmp = get_path(new_dentry);
+    if (IS_ERR(tmp)) {
+        LOG("rename get_path(new_dentry) failed");
+        return PTR_ERR(tmp);
+    }
+
+    int error = simple_rename(old_dir, old_dentry, new_dir, new_dentry);
+    if (error) {
+        kfree(tmp);
+        return error;
+    }
+
+    LOG("rename %s %s", (char*)inode->i_private, tmp);
+    kfree(inode->i_private);
+    inode->i_private = tmp;
+
+    return 0;
 }
 
 static struct file_operations dir_op = {
