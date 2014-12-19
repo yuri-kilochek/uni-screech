@@ -6,6 +6,7 @@
 #include <linux/pagemap.h>
 #include <linux/fs.h>
 #include <linux/dcache.h>
+#include <linux/namei.h>
 #include <linux/backing-dev.h>
 
 #include "file.h"
@@ -74,21 +75,6 @@ static struct inode *make_inode(struct super_block *sb, const struct inode *pare
 
 
 
-
-
-
-struct dentry *lookup(struct inode *parent, struct dentry *dentry, struct nameidata *nd) {
-    //struct fs_node *parent_node = parent->i_private;
-    //char const* name = dentry->dname.name;
-    //if (/* name in parent*/) {
-     //   d_add(dentry, /* get inode for file name */);
-    //} else {
-        d_add(dentry, NULL);
-    //}
-    
-    return NULL;
-}
-
 static char *get_dentry_path(struct dentry *dentry) {
     int len = 256;
     for (;;) {
@@ -102,12 +88,35 @@ static char *get_dentry_path(struct dentry *dentry) {
                 len *= 2;
                 continue;
             }
-            return res;    
+            return res;
         }
         memmove(buf, res, strlen(res) + 1);
         return buf;
     }
 }
+
+
+//static struct dentry *lookup(struct inode *parent, struct dentry *dentry, struct nameidata *nd) {
+//    //struct fs_node *parent_node = parent->i_private;
+//
+//    char *path = get_dentry_path(dentry);
+//    if (IS_ERR(path)) {
+//        LOG("lookup get_dentry_path() failed");
+//    } else {
+//        LOG("lookup %s", path);
+//        kfree(path);
+//    }
+//
+//    //if (/* name in parent*/) {
+//     //   d_add(dentry, /* get inode for file name */);
+//    //} else {
+//        d_add(dentry, NULL);
+//    //}
+//
+//    return NULL;
+//}
+
+
 
 static int mkdir(struct inode *parent, struct dentry *dentry, int mode) {
     struct inode *child = make_inode(parent->i_sb, parent, S_IFDIR | mode);
@@ -126,7 +135,8 @@ static int mkdir(struct inode *parent, struct dentry *dentry, int mode) {
     
     char *path = get_dentry_path(dentry);
     if (IS_ERR(path)) {
-        LOG("get_dentry_path() failed");
+        LOG("mkdir get_dentry_path() failed");
+        return PTR_ERR(path);
     } else {
         LOG("mkdir %s", path);
         kfree(path);
@@ -136,22 +146,52 @@ static int mkdir(struct inode *parent, struct dentry *dentry, int mode) {
 }
 
 static int rmdir(struct inode *dir, struct dentry *dentry) {
-    if (!simple_empty(dentry))
-        return -ENOTEMPTY;
+    int error = simple_rmdir(dir, dentry);
 
-    drop_nlink(dentry->d_inode);
-    simple_unlink(dir, dentry);
-    drop_nlink(dir);
-
-    char *path = get_dentry_path(dentry);
-    if (IS_ERR(path)) {
-        LOG("get_dentry_path() failed");
-    } else {
+    if (!error) {
+        char *path = get_dentry_path(dentry);
+        if (IS_ERR(path)) {
+            LOG("rmdir get_dentry_path(dentry) failed");
+            error = PTR_ERR(path);
+            goto exit;
+        }
         LOG("rmdir %s", path);
-        kfree(path);
+    exit:
+        if (path)
+            kfree(path);
     }
 
-    return 0;
+    return error;
+}
+
+static int rename(struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry) {
+    int error = simple_rename(old_dir, old_dentry, new_dir, new_dentry);
+
+    if (!error) {
+        char* old_path = get_dentry_path(old_dentry);
+        if (IS_ERR(old_path)) {
+            LOG("rename get_dentry_path(old_dentry) failed");
+            error = PTR_ERR(old_path);
+            old_path = 0;
+            goto exit_old;
+        }
+        char* new_path = get_dentry_path(new_dentry);
+        if (IS_ERR(new_path)) {
+            LOG("rename get_dentry_path(new_dentry) failed");
+            error = PTR_ERR(new_path);
+            new_path = 0;
+            goto exit_new;
+        }
+        LOG("rename %s %s", old_path, new_path);
+    exit_new:
+        if (new_path)
+            kfree(new_path);
+    exit_old:
+        if (old_path)
+            kfree(old_path);
+    }
+
+    return error;
 }
 
 static struct file_operations dir_f_op = {
@@ -167,7 +207,7 @@ static struct inode_operations dir_i_op = {
     .lookup = simple_lookup,
     .mkdir = mkdir,
     .rmdir = rmdir,
-    .rename = simple_rename,
+    .rename = rename,
 };
 
 
