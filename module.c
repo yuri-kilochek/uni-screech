@@ -10,28 +10,18 @@
 #include <linux/backing-dev.h>
 
 #include "file.h"
-#include "dir.h"
-
-
 
 #define MAGIC 0x5C12EEC8
 #define DEFAULT_MODE 0755
 
-#define CACHE_PREFIX ".screech-cache."
+#define CACHE_PREFIX "screech-cache."
 
 #define LOG(...) printk(KERN_INFO "SCREECH " __VA_ARGS__)
 
 struct mount_args {
-    char *container_path;
+    char *container;
     char *key;
 };
-
-
-/*
-static struct fs_info *get_fs_info(struct super_block *sb) {
-    return sb->s_fs_info;
-}*/
-
 
 static struct file_system_type fs_type;
 static struct super_operations s_op;
@@ -212,7 +202,6 @@ static struct inode_operations dir_iop = {
 };
 
 static struct super_operations s_op = {
-//    .statfs = simple_statfs,
     .drop_inode = drop_inode,
 };
 
@@ -263,12 +252,12 @@ static struct dentry *mount(struct file_system_type *fs_type, int flags, const c
         goto failure;
     }
 
-    mount_args->container_path = kmalloc(strlen(dev_name) + 1, GFP_KERNEL);
-    if (!mount_args->container_path) {
+    mount_args->container = kmalloc(strlen(dev_name) + 1, GFP_KERNEL);
+    if (!mount_args->container) {
         error = -ENOMEM;
         goto failure;
     }
-    strcpy(mount_args->container_path, dev_name);
+    strcpy(mount_args->container, dev_name);
 
     if (!options)
         options = "";
@@ -289,8 +278,8 @@ static struct dentry *mount(struct file_system_type *fs_type, int flags, const c
 
 failure:
     if (mount_args) {
-        if (mount_args->container_path) {
-            kfree(mount_args->container_path);
+        if (mount_args->container) {
+            kfree(mount_args->container);
         }
         if (mount_args->key) {
             kfree(mount_args->key);
@@ -303,7 +292,7 @@ failure:
 static void kill_sb(struct super_block *sb) {
     struct mount_args *mount_args = sb->s_fs_info;
 
-    kfree(mount_args->container_path);
+    kfree(mount_args->container);
     kfree(mount_args->key);
     kfree(mount_args);
 
