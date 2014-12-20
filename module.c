@@ -218,11 +218,12 @@ static struct super_operations s_op = {
 static void load_structure(struct dentry *root) {
     struct super_block *sb = root->d_inode->i_sb;
 
-    struct dentry *a = d_alloc_name(root, "a"); make_inode(sb, root->d_inode, a , S_IFDIR | 0755);
-    struct dentry *b = d_alloc_name(root, "b"); make_inode(sb, root->d_inode, b , S_IFDIR | 0755);
+    struct dentry *a = d_alloc_name(root, "a"); make_inode(sb, root->d_inode, a, S_IFDIR | 0755); d_rehash(a);
 
-    struct dentry *a_1 = d_alloc_name(a, "1"); make_inode(sb, a->d_inode, a_1, S_IFREG | 0644);
-    struct dentry *a_2 = d_alloc_name(a, "1"); make_inode(sb, a->d_inode, a_2, S_IFREG | 0644);
+    struct dentry *b = d_alloc_name(root, "b"); make_inode(sb, root->d_inode, b, S_IFDIR | 0755); d_rehash(b);
+
+    struct dentry *a_1 = d_alloc_name(a, "1"); make_inode(sb, a->d_inode, a_1, S_IFREG | 0644); d_rehash(a_1);
+    struct dentry *a_2 = d_alloc_name(a, "2"); make_inode(sb, a->d_inode, a_2, S_IFREG | 0644); d_rehash(a_2);
 }
 
 static int fill_super(struct super_block *sb, void *data, int silent) {
