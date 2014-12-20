@@ -94,7 +94,7 @@ static char *get_path(struct dentry *dentry) {
     }
 }
 
-static struct inode *make_inode(struct super_block *sb, struct inode *parent, struct dentry *dentry, int mode) {
+static struct inode *make_inode(struct super_block *sb, struct inode *dir, struct dentry *dentry, int mode) {
     char *path = get_path(dentry);
     if (IS_ERR(path)) {
         LOG("make_inode get_path(dentry) failed");
@@ -112,15 +112,15 @@ static struct inode *make_inode(struct super_block *sb, struct inode *parent, st
     inode->i_ino = get_next_ino();
     inode->i_ctime = inode->i_mtime = inode->i_atime = CURRENT_TIME;
 
-    inode_init_owner(inode, parent, mode);
+    inode_init_owner(inode, dir, mode);
 
     if (dentry) {
         d_instantiate(dentry, inode);
         dget(dentry);
     }
 
-    if (parent) {
-        inc_nlink(parent);
+    if (dir) {
+        inc_nlink(dir);
     }
 
     switch (mode & S_IFMT) {
@@ -212,18 +212,18 @@ static struct inode_operations dir_iop = {
 
 static struct super_operations s_op = {
 //    .statfs = simple_statfs,
-//    .drop_inode = generic_delete_inode,
+    .drop_inode = generic_delete_inode,
 };
 
-static void load_structure(struct dentry *root) {
+static void unpack(struct dentry *root) {
     struct super_block *sb = root->d_inode->i_sb;
 
-    struct dentry *a = d_alloc_name(root, "a"); make_inode(sb, root->d_inode, a, S_IFDIR | 0755); d_rehash(a);
+    struct dentry *a = d_alloc_name(root, "a"); make_inode(sb, root->d_inode, a, S_IFDIR | 0755); dput(a); d_rehash(a);
 
-    struct dentry *b = d_alloc_name(root, "b"); make_inode(sb, root->d_inode, b, S_IFDIR | 0755); d_rehash(b);
+    struct dentry *b = d_alloc_name(root, "b"); make_inode(sb, root->d_inode, b, S_IFDIR | 0755); dput(b); d_rehash(b);
 
-    struct dentry *a_1 = d_alloc_name(a, "1"); make_inode(sb, a->d_inode, a_1, S_IFREG | 0644); d_rehash(a_1);
-    struct dentry *a_2 = d_alloc_name(a, "2"); make_inode(sb, a->d_inode, a_2, S_IFREG | 0644); d_rehash(a_2);
+    struct dentry *a_1 = d_alloc_name(a, "1"); make_inode(sb, a->d_inode, a_1, S_IFREG | 0644); dput(a_1); d_rehash(a_1);
+    struct dentry *a_2 = d_alloc_name(a, "2"); make_inode(sb, a->d_inode, a_2, S_IFREG | 0644); dput(a_2); d_rehash(a_2);
 }
 
 static int fill_super(struct super_block *sb, void *data, int silent) {
@@ -247,7 +247,7 @@ static int fill_super(struct super_block *sb, void *data, int silent) {
         return -ENOMEM;
     }
 
-    load_structure(sb->s_root);
+    unpack(sb->s_root);
 
     return 0;
 }
