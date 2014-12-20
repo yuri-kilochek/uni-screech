@@ -67,7 +67,6 @@ static struct file_operations reg_op = {
     .read = read,
     .write = write,
     .release = release,
-//    .fsync = noop_fsync,
 };
 
 static struct inode_operations reg_iop = {
@@ -98,31 +97,31 @@ static char *get_path(struct dentry *dentry) {
 static struct inode *make_inode(struct super_block *sb, struct inode *parent, struct dentry *dentry, int mode) {
     char *path = get_path(dentry);
     if (IS_ERR(path)) {
-        LOG("make_inode get_path() failed");
+        LOG("make_inode get_path(dentry) failed");
         return ERR_CAST(path);
     }
 
     struct inode *inode = new_inode(sb);
     if (!inode) {
-        if (path)
+        if (path) {
             kfree(path);
+        }
         return ERR_PTR(-ENOMEM);
     }
 
     inode->i_ino = get_next_ino();
+    inode->i_ctime = inode->i_mtime = inode->i_atime = CURRENT_TIME;
+
+    inode_init_owner(inode, parent, mode);
+
     if (dentry) {
         d_instantiate(dentry, inode);
         dget(dentry);
     }
-    if (parent)
+
+    if (parent) {
         inc_nlink(parent);
-
-    struct timespec ct = CURRENT_TIME;
-    inode->i_ctime = ct;
-    inode->i_mtime = ct;
-    inode->i_atime = ct;
-
-    inode_init_owner(inode, parent, mode);
+    }
 
     switch (mode & S_IFMT) {
     case S_IFREG:
@@ -132,7 +131,7 @@ static struct inode *make_inode(struct super_block *sb, struct inode *parent, st
     case S_IFDIR:
         inode->i_op = &dir_iop;
         inode->i_fop = &dir_op;
-            // directory inodes start off with i_nlink == 2 (for "." entry)
+        // directory inodes start off with i_nlink == 2 (for "." entry)
         inc_nlink(inode);
         break;
     }
@@ -156,7 +155,6 @@ static int unlink(struct inode *dir, struct dentry *dentry) {
     LOG("unlink %s", (char*)dentry->d_inode->i_private);
     return simple_unlink(dir, dentry);
 }
-
 
 static int mkdir(struct inode *dir, struct dentry *dentry, int mode) {
     struct inode *inode = make_inode(dir->i_sb, dir, dentry, S_IFDIR | mode);
@@ -201,7 +199,6 @@ static struct file_operations dir_op = {
     .llseek = dcache_dir_lseek,
     .read = generic_read_dir,
     .readdir = dcache_readdir,
-//    .fsync = noop_fsync,
 };
 
 static struct inode_operations dir_iop = {
@@ -217,6 +214,16 @@ static struct super_operations s_op = {
 //    .statfs = simple_statfs,
 //    .drop_inode = generic_delete_inode,
 };
+
+static void load_structure(struct dentry *root) {
+    struct super_block *sb = root->d_inode->i_sb;
+
+    struct dentry *a = d_alloc_name(root, "a"); make_inode(sb, root->d_inode, a , S_IFDIR | 0755);
+    struct dentry *b = d_alloc_name(root, "b"); make_inode(sb, root->d_inode, b , S_IFDIR | 0755);
+
+    struct dentry *a_1 = d_alloc_name(a, "1"); make_inode(sb, a->d_inode, a_1, S_IFREG | 0644);
+    struct dentry *a_2 = d_alloc_name(a, "1"); make_inode(sb, a->d_inode, a_2, S_IFREG | 0644);
+}
 
 static int fill_super(struct super_block *sb, void *data, int silent) {
     struct mount_args *mount_args = data;
@@ -238,6 +245,8 @@ static int fill_super(struct super_block *sb, void *data, int silent) {
         iput(iroot);
         return -ENOMEM;
     }
+
+    load_structure(sb->s_root);
 
     return 0;
 }
