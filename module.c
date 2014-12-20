@@ -125,13 +125,21 @@ static struct inode *make_inode(struct super_block *sb, struct inode *dir, struc
         break;
     }
 
-    if (dentry)
+    if (dentry) {
         d_instantiate(dentry, inode);
+        dget(dentry);
+    }
 
-    if (dir)
+    if (dir) {
         inc_nlink(dir);
+    }
 
     return inode;
+}
+
+static int drop_inode(struct inode *inode) {
+    kfree(inode->i_private);
+    return generic_delete_inode(inode);
 }
 
 static int create(struct inode *dir, struct dentry *dentry, int mode, struct nameidata *nd) {
@@ -205,18 +213,18 @@ static struct inode_operations dir_iop = {
 
 static struct super_operations s_op = {
 //    .statfs = simple_statfs,
-    .drop_inode = generic_delete_inode,
+    .drop_inode = drop_inode,
 };
 
 static void unpack(struct dentry *root) {
     struct super_block *sb = root->d_inode->i_sb;
 
-    struct dentry *a = d_alloc_name(root, "a"); d_rehash(a); make_inode(sb, root->d_inode, a, S_IFDIR | 0755);
-        struct dentry *a_1 = d_alloc_name(a, "1"); d_rehash(a_1); make_inode(sb, a->d_inode, a_1, S_IFREG | 0644);
-        struct dentry *a_2 = d_alloc_name(a, "2"); d_rehash(a_2); make_inode(sb, a->d_inode, a_2, S_IFREG | 0644);
-    struct dentry *b = d_alloc_name(root, "b"); d_rehash(b); make_inode(sb, root->d_inode, b, S_IFDIR | 0755);
-        struct dentry *b_3 = d_alloc_name(b, "3"); d_rehash(b_3); make_inode(sb, b->d_inode, b_3, S_IFREG | 0644);
-        struct dentry *b_4 = d_alloc_name(b, "4"); d_rehash(b_4); make_inode(sb, b->d_inode, b_4, S_IFREG | 0644);
+    struct dentry *a = d_alloc_name(root, "a"); d_rehash(a); make_inode(sb, root->d_inode, a, S_IFDIR | 0755); dput(a);
+        struct dentry *a_1 = d_alloc_name(a, "1"); d_rehash(a_1); make_inode(sb, a->d_inode, a_1, S_IFREG | 0644); dput(a_1);
+        struct dentry *a_2 = d_alloc_name(a, "2"); d_rehash(a_2); make_inode(sb, a->d_inode, a_2, S_IFREG | 0644); dput(a_2);
+    struct dentry *b = d_alloc_name(root, "b"); d_rehash(b); make_inode(sb, root->d_inode, b, S_IFDIR | 0755); dput(b);
+        struct dentry *b_3 = d_alloc_name(b, "3"); d_rehash(b_3); make_inode(sb, b->d_inode, b_3, S_IFREG | 0644); dput(b_3);
+        struct dentry *b_4 = d_alloc_name(b, "4"); d_rehash(b_4); make_inode(sb, b->d_inode, b_4, S_IFREG | 0644); dput(b_4);
 }
 
 static int fill_super(struct super_block *sb, void *data, int silent) {
