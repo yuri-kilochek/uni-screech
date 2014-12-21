@@ -206,6 +206,8 @@ static struct super_operations s_op = {
 };
 
 static void unpack(struct dentry *root) {
+    LOG("unpack");
+
     struct super_block *sb = root->d_inode->i_sb;
 
     struct dentry *a = d_alloc_name(root, "a"); d_rehash(a); make_inode(sb, root->d_inode, a, S_IFDIR | 0755); dput(a);
@@ -214,6 +216,10 @@ static void unpack(struct dentry *root) {
     struct dentry *b = d_alloc_name(root, "b"); d_rehash(b); make_inode(sb, root->d_inode, b, S_IFDIR | 0755); dput(b);
         struct dentry *b_3 = d_alloc_name(b, "3"); d_rehash(b_3); make_inode(sb, b->d_inode, b_3, S_IFREG | 0644); dput(b_3);
         struct dentry *b_4 = d_alloc_name(b, "4"); d_rehash(b_4); make_inode(sb, b->d_inode, b_4, S_IFREG | 0644); dput(b_4);
+}
+
+static void repack(struct dentry *root) {
+    LOG("repack");
 }
 
 static int fill_super(struct super_block *sb, void *data, int silent) {
@@ -242,7 +248,6 @@ static int fill_super(struct super_block *sb, void *data, int silent) {
     return 0;
 }
 
-
 static struct dentry *mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *options) {
     int error = 0;
     
@@ -268,7 +273,7 @@ static struct dentry *mount(struct file_system_type *fs_type, int flags, const c
     }
     strcpy(mount_args->key, options);
     
-    struct dentry *droot = mount_nodev(fs_type, flags, mount_args, &fill_super);
+    struct dentry *droot = mount_nodev(fs_type, flags, mount_args, fill_super);
     if (IS_ERR(droot)) {
         error = PTR_ERR(droot);
         goto failure;
@@ -290,6 +295,8 @@ failure:
 }
 
 static void kill_sb(struct super_block *sb) {
+    repack(sb->s_root);
+
     struct mount_args *mount_args = sb->s_fs_info;
 
     kfree(mount_args->container);
