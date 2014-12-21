@@ -18,9 +18,9 @@
 
 #define LOG(...) printk(KERN_INFO "SCREECH " __VA_ARGS__)
 
-struct mount_args {
-    char *container;
-    char *key;
+struct fs_data {
+    char *container_path;
+    char *crypt_key;
 };
 
 static struct file_system_type fs_type;
@@ -31,8 +31,8 @@ static struct inode_operations reg_iop;
 static struct file_operations reg_op;
 
 static int open(struct inode *inode, struct file *file) {
-    file->private_data = inode->i_private;
     LOG("open %s", (char*)inode->i_private);
+    file->private_data = inode->i_private;
     return 0;
 }
 
@@ -59,10 +59,7 @@ static struct file_operations reg_op = {
     .release = release,
 };
 
-static struct inode_operations reg_iop = {
-//    .setattr = simple_setattr,
-//    .getattr = simple_getattr,
-};
+static struct inode_operations reg_iop = {};
 
 static char *get_path(struct dentry *dentry) {
     int len = 256;
@@ -218,45 +215,46 @@ static void unpack(struct dentry *root) {
         struct dentry *b_4 = d_alloc_name(b, "4"); d_rehash(b_4); make_inode(sb, b->d_inode, b_4, S_IFREG | 0644); dput(b_4);
 }
 
-static void save(struct file *container, long long *offset, struct dentry *dentry) {
-    char *path = dentry->d_inode->i_private;
-    *offset += file_write(container, *offset, path, strlen(path));
+static void save(struct file *container, struct dentry *dentry, long long *offset) {
+    offset = offset ? offset : &(long long){0};
+
+    struct qstr *name = &dentry->d_name;
+    *offset += file_write(container, *offset, name->name, name->len);
     *offset += file_write(container, *offset, "\n", strlen("\n"));
 
     struct list_head *i;
     list_for_each(i, &dentry->d_subdirs) {
         struct dentry *subdentry = list_entry(i, struct dentry, d_u.d_child);
-        save(container, offset, subdentry);
+        save(container, subdentry, offset);
     }
 }
 
-static void repack(struct dentry *root) {
+static int repack(struct dentry *root) {
     LOG("repack");
 
-    struct mount_args *margs = root->d_sb->s_fs_info;
+    struct fs_data *fs_data = root->d_sb->s_fs_info;
 
-    struct file *container = file_open(margs->container, O_RDWR | O_TRUNC, 0644);
+    struct file *container = file_open(fs_data->container_path, O_WRONLY | O_TRUNC, 0000);
     if (IS_ERR(container)) {
-        LOG("repack file_open(margs->container) failed.");
-        return;
+        LOG("repack file_open(fs_data->container_path, O_WRONLY | O_TRUNC, 0000) failed");
+        return PTR_ERR(container);
     }
 
-    long long offset = 0;
-    save(container, &offset, root);
+    save(container, root, NULL);
 
     file_close(container);
+
+    return 0;
 }
 
 static int fill_super(struct super_block *sb, void *data, int silent) {
-    struct mount_args *mount_args = data;
-    
     sb->s_magic = MAGIC;    
     sb->s_maxbytes = MAX_LFS_FILESIZE;
     sb->s_blocksize = PAGE_CACHE_SIZE;
     sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
     sb->s_time_gran = 1;
     sb->s_op = &s_op;
-    sb->s_fs_info = mount_args;
+    sb->s_fs_info = data;
 
     struct inode *iroot = make_inode(sb, NULL, NULL, S_IFDIR | 0755);
     if (IS_ERR(iroot))
@@ -275,30 +273,32 @@ static int fill_super(struct super_block *sb, void *data, int silent) {
 
 static struct dentry *mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *options) {
     int error = 0;
-    
-    struct mount_args *mount_args = kzalloc(sizeof(struct mount_args), GFP_KERNEL);
-    if (!mount_args) {
-        error = -ENOMEM;
-        goto failure;
-    }
-
-    mount_args->container = kmalloc(strlen(dev_name) + 1, GFP_KERNEL);
-    if (!mount_args->container) {
-        error = -ENOMEM;
-        goto failure;
-    }
-    strcpy(mount_args->container, dev_name);
 
     if (!options)
         options = "";
-    mount_args->key = kmalloc(strlen(options) + 1, GFP_KERNEL);
-    if (!mount_args->key) {
+
+    struct fs_data *fs_data = kmalloc(sizeof(struct fs_data), GFP_KERNEL);
+    if (!fs_data) {
         error = -ENOMEM;
         goto failure;
     }
-    strcpy(mount_args->key, options);
+    memset(fs_data, 0, sizeof(struct fs_data));
+
+    fs_data->container_path = kmalloc(strlen(dev_name) + 1, GFP_KERNEL);
+    if (!fs_data->container_path) {
+        error = -ENOMEM;
+        goto failure;
+    }
+    strcpy(fs_data->container_path, dev_name);
+
+    fs_data->crypt_key = kmalloc(strlen(options) + 1, GFP_KERNEL);
+    if (!fs_data->crypt_key) {
+        error = -ENOMEM;
+        goto failure;
+    }
+    strcpy(fs_data->crypt_key, options);
     
-    struct dentry *droot = mount_nodev(fs_type, flags, mount_args, fill_super);
+    struct dentry *droot = mount_nodev(fs_type, flags, fs_data, fill_super);
     if (IS_ERR(droot)) {
         error = PTR_ERR(droot);
         goto failure;
@@ -307,26 +307,27 @@ static struct dentry *mount(struct file_system_type *fs_type, int flags, const c
     return droot;
 
 failure:
-    if (mount_args) {
-        if (mount_args->container) {
-            kfree(mount_args->container);
+    if (fs_data) {
+        if (!fs_data->container_path) {
+            kfree(fs_data->container_path);
         }
-        if (mount_args->key) {
-            kfree(mount_args->key);
+        if (fs_data->crypt_key) {
+            kfree(fs_data->crypt_key);
         }
-        kfree(mount_args);
+        kfree(fs_data);
     }
+
     return ERR_PTR(error);
 }
 
 static void kill_sb(struct super_block *sb) {
     repack(sb->s_root);
 
-    struct mount_args *mount_args = sb->s_fs_info;
+    struct fs_data *fs_data = sb->s_fs_info;
 
-    kfree(mount_args->container);
-    kfree(mount_args->key);
-    kfree(mount_args);
+    kfree(fs_data->container_path);
+    kfree(fs_data->crypt_key);
+    kfree(fs_data);
 
     kill_litter_super(sb);
 }
@@ -349,5 +350,5 @@ module_init(startup);
 module_exit(shutdown);
 
 MODULE_AUTHOR("Yuri Kilochek <yuri.kilochek@gmail.com>");
-MODULE_DESCRIPTION("Encrypted file system");
+MODULE_DESCRIPTION("\"Encrypted\" file system");
 MODULE_LICENSE("GPL");
