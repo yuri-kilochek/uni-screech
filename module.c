@@ -218,8 +218,33 @@ static void unpack(struct dentry *root) {
         struct dentry *b_4 = d_alloc_name(b, "4"); d_rehash(b_4); make_inode(sb, b->d_inode, b_4, S_IFREG | 0644); dput(b_4);
 }
 
+static void save(struct file *container, long long *offset, struct dentry *dentry) {
+    char *path = dentry->d_inode->i_private;
+    *offset += file_write(container, *offset, path, strlen(path));
+    *offset += file_write(container, *offset, "\n", strlen("\n"));
+
+    struct list_head *i;
+    list_for_each(i, &dentry->d_subdirs) {
+        struct dentry *subdentry = list_entry(i, struct dentry, d_u.d_child);
+        save(container, offset, subdentry);
+    }
+}
+
 static void repack(struct dentry *root) {
     LOG("repack");
+
+    struct mount_args *margs = root->d_sb->s_fs_info;
+
+    struct file *container = file_open(margs->container, O_RDWR | O_TRUNC, 0644);
+    if (IS_ERR(container)) {
+        LOG("repack file_open(margs->container) failed.");
+        return;
+    }
+
+    long long offset = 0;
+    save(container, &offset, root);
+
+    file_close(container);
 }
 
 static int fill_super(struct super_block *sb, void *data, int silent) {

@@ -1,5 +1,6 @@
 #include "file.h"
 
+#include <linux/slab.h>
 #include <asm/uaccess.h>
 
 struct file *file_open(char const *path, int flags, int rights) {
