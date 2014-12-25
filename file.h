@@ -4,8 +4,8 @@
 #include <linux/fs.h>
 
 struct file *file_open(char const *path, int flags, int rights);
-int file_read(struct file *file, long long offset, void *data, int size);
-int file_write(struct file *file, long long offset, void const *data, int size);
+ssize_t file_read(struct file *file, char __user *buffer, size_t size, loff_t *offset);
+ssize_t file_write(struct file *file, const char __user *buffer, size_t size, loff_t *offset);
 int file_close(struct file *file);
 
 #endif

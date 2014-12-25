@@ -12,11 +12,16 @@
 #include "file.h"
 
 #define MAGIC 0x5C12EEC8
-#define DEFAULT_MODE 0755
-
-#define CACHE_PREFIX "screech-cache."
 
 #define LOG(...) printk(KERN_INFO "SCREECH " __VA_ARGS__)
+
+#define CACHE_PREFIX "/tmp/screech-cache-"
+
+#define CACHE_PATH_SIZE (sizeof(CACHE_PREFIX) + sizeof(unsigned long) * 2)
+
+void make_cache_path(char *cache_path, unsigned long no) {
+    snprintf(cache_path, CACHE_PATH_SIZE, "%s%0*lX", CACHE_PREFIX, (int)(sizeof(unsigned long) * 2), no);
+}
 
 struct fs_data {
     char *container_path;
@@ -31,25 +36,33 @@ static struct inode_operations reg_iop;
 static struct file_operations reg_op;
 
 static int open(struct inode *inode, struct file *file) {
-    LOG("open %s", (char*)inode->i_private);
-    file->private_data = inode->i_private;
+    LOG("open %s", file->f_dentry->d_name.name);
+
+    char cache_path[CACHE_PATH_SIZE];
+    make_cache_path(cache_path, inode->i_ino);
+
+    file->private_data = file_open(cache_path, O_CREAT | file->f_mode & (O_APPEND | O_TRUNC), 0600);
+    if (IS_ERR(file->private_data)) {
+        LOG("open file_open(cache_path, ..., 0600) failed");
+        return PTR_ERR(file->private_data);
+    }
+
     return 0;
 }
 
 static ssize_t read(struct file *file, char __user *buffer, size_t size, loff_t *offset) {
-    LOG("read %s %d %d", (char*)file->private_data, (int)size, (int)*offset);
-    return 0;
+    LOG("read %s %d %d", file->f_dentry->d_name.name, (int)size, (int)*offset);
+    return vfs_read(file->private_data, buffer, size, offset);
 }
 
 static ssize_t write(struct file *file, const char __user *buffer, size_t size, loff_t *offset) {
-    LOG("write %s %d %d", (char*)file->private_data, (int)size, (int)*offset);
-    *offset += size;
-    return size;
+    LOG("write %s %d %d", file->f_dentry->d_name.name, (int)size, (int)*offset);
+    return vfs_write(file->private_data, buffer, size, offset);
 }
 
 static int release (struct inode *inode, struct file *file) {
-    LOG("release %s", (char*)inode->i_private);
-    return 0;
+    LOG("release %s", file->f_dentry->d_name.name);
+    return file_close(file->private_data);
 }
 
 static struct file_operations reg_op = {
@@ -61,43 +74,35 @@ static struct file_operations reg_op = {
 
 static struct inode_operations reg_iop = {};
 
-static char *get_path(struct dentry *dentry) {
-    int len = 256;
-    for (;;) {
-        char *buf = kmalloc(len, GFP_KERNEL);
-        if (!buf)
-            return ERR_PTR(-ENOMEM);
-        char *res = dentry ? dentry_path_raw(dentry, buf, len) : strcpy(buf, "/");
-        if (IS_ERR(res)) {
-            kfree(buf);
-            if (PTR_ERR(res) == -ENAMETOOLONG) {
-                len *= 2;
-                continue;
-            }
-            return res;
-        }
-        memmove(buf, res, strlen(res) + 1);
-        return buf;
-    }
-}
+//static char *get_path(struct dentry *dentry) {
+//    int len = 256;
+//    for (;;) {
+//        char *buf = kmalloc(len, GFP_KERNEL);
+//        if (!buf)
+//            return ERR_PTR(-ENOMEM);
+//        char *res = dentry ? dentry_path_raw(dentry, buf, len) : strcpy(buf, "/");
+//        if (IS_ERR(res)) {
+//            kfree(buf);
+//            if (PTR_ERR(res) == -ENAMETOOLONG) {
+//                len *= 2;
+//                continue;
+//            }
+//            return res;
+//        }
+//        memmove(buf, res, strlen(res) + 1);
+//        return buf;
+//    }
+//}
 
 static struct inode *make_inode(struct super_block *sb, struct inode *dir, struct dentry *dentry, int mode) {
-    char *path = get_path(dentry);
-    if (IS_ERR(path)) {
-        LOG("make_inode get_path(dentry) failed");
-        return ERR_CAST(path);
-    }
-
     struct inode *inode = new_inode(sb);
     if (!inode) {
-        kfree(path);
         return ERR_PTR(-ENOMEM);
     }
 
     inode->i_ino = get_next_ino();
     inode->i_ctime = inode->i_mtime = inode->i_atime = CURRENT_TIME;
     inode->i_mode = mode;
-    inode->i_private = path;
 
     switch (mode & S_IFMT) {
     case S_IFREG:
@@ -125,60 +130,40 @@ static struct inode *make_inode(struct super_block *sb, struct inode *dir, struc
 }
 
 static int drop_inode(struct inode *inode) {
-    kfree(inode->i_private);
     return generic_delete_inode(inode);
 }
 
 static int create(struct inode *dir, struct dentry *dentry, int mode, struct nameidata *nd) {
+    LOG("create %s", dentry->d_name.name);
+
     struct inode *inode = make_inode(dir->i_sb, dir, dentry, S_IFREG | mode);
     if (IS_ERR(inode))
         return PTR_ERR(inode);
-
-    LOG("create %s", (char*)inode->i_private);
-
     return 0;
 }
 
 static int unlink(struct inode *dir, struct dentry *dentry) {
-    LOG("unlink %s", (char*)dentry->d_inode->i_private);
+    LOG("unlink %s", dentry->d_name.name);
     return simple_unlink(dir, dentry);
 }
 
 static int mkdir(struct inode *dir, struct dentry *dentry, int mode) {
+    LOG("mkdir %s", dentry->d_name.name);
+
     struct inode *inode = make_inode(dir->i_sb, dir, dentry, S_IFDIR | mode);
     if (IS_ERR(inode))
         return PTR_ERR(inode);
-
-    LOG("mkdir %s", (char*)inode->i_private);
-
     return 0;
 }
 
 static int rmdir(struct inode *dir, struct dentry *dentry) {
-    LOG("rmdir %s", (char *) dentry->d_inode->i_private);
+    LOG("rmdir %s", dentry->d_name.name);
     return simple_rmdir(dir, dentry);
 }
 
 static int rename(struct inode *old_dir, struct dentry *old_dentry, struct inode *new_dir, struct dentry *new_dentry) {
-    struct inode *inode = old_dentry->d_inode;
-
-    char* tmp = get_path(new_dentry);
-    if (IS_ERR(tmp)) {
-        LOG("rename get_path(new_dentry) failed");
-        return PTR_ERR(tmp);
-    }
-
-    int error = simple_rename(old_dir, old_dentry, new_dir, new_dentry);
-    if (error) {
-        kfree(tmp);
-        return error;
-    }
-
-    LOG("rename %s %s", (char*)inode->i_private, tmp);
-    kfree(inode->i_private);
-    inode->i_private = tmp;
-
-    return 0;
+    LOG("rename %s %s", old_dentry->d_name.name, new_dentry->d_name.name);
+    return simple_rename(old_dir, old_dentry, new_dir, new_dentry);
 }
 
 static struct file_operations dir_op = {
@@ -215,12 +200,12 @@ static void unpack(struct dentry *root) {
         struct dentry *b_4 = d_alloc_name(b, "4"); d_rehash(b_4); make_inode(sb, b->d_inode, b_4, S_IFREG | 0644); dput(b_4);
 }
 
-static void save(struct file *container, struct dentry *dentry, long long *offset) {
-    offset = offset ? offset : &(long long){0};
+static void save(struct file *container, struct dentry *dentry, loff_t *offset) {
+    offset = offset ? offset : &(loff_t){0};
 
     struct qstr *name = &dentry->d_name;
-    *offset += file_write(container, *offset, name->name, name->len);
-    *offset += file_write(container, *offset, "\n", strlen("\n"));
+    file_write(container, name->name, name->len, offset);
+    file_write(container, "\n", strlen("\n"), offset);
 
     struct list_head *i;
     list_for_each(i, &dentry->d_subdirs) {
