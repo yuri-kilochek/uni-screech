@@ -41,13 +41,20 @@ static int open(struct inode *inode, struct file *file) {
     char cache_path[CACHE_PATH_SIZE];
     make_cache_path(cache_path, inode->i_ino);
 
-    file->private_data = file_open(cache_path, O_CREAT | file->f_mode & (O_APPEND | O_TRUNC), 0600);
+    LOG("open file->f_flags %o", file->f_flags);
+
+    file->private_data = file_open(cache_path, file->f_flags, 0600);
     if (IS_ERR(file->private_data)) {
-        LOG("open file_open(cache_path, ..., 0600) failed");
+        LOG("open file_open(cache_path, file->f_flags, 0600) failed");
         return PTR_ERR(file->private_data);
     }
 
     return 0;
+}
+
+static loff_t llseek(struct file *file, loff_t offset, int whence) {
+    LOG("llseek %d %s", (int)offset, (whence == SEEK_SET) ? "SEEK_SET" : (whence == SEEK_CUR) ? "SEEK_CUR" : (whence == SEEK_END) ? "SEEK_END" : "???");
+    return vfs_llseek(file->private_data, offset, whence);
 }
 
 static ssize_t read(struct file *file, char __user *buffer, size_t size, loff_t *offset) {
@@ -60,13 +67,14 @@ static ssize_t write(struct file *file, const char __user *buffer, size_t size, 
     return vfs_write(file->private_data, buffer, size, offset);
 }
 
-static int release (struct inode *inode, struct file *file) {
+static int release(struct inode *inode, struct file *file) {
     LOG("release %s", file->f_dentry->d_name.name);
     return file_close(file->private_data);
 }
 
 static struct file_operations reg_op = {
     .open = open,
+    .llseek = llseek,
     .read = read,
     .write = write,
     .release = release,

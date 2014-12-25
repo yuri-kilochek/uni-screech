@@ -22,7 +22,7 @@ ssize_t file_read(struct file *file, char __user *buffer, size_t size, loff_t *o
 ssize_t file_write(struct file *file, const char __user *buffer, size_t size, loff_t *offset) {
     mm_segment_t fs = get_fs();
     set_fs(get_ds());
-    ssize_t result = vfs_write(file, buffer, size, &offset);
+    ssize_t result = vfs_write(file, buffer, size, offset);
     set_fs(fs);
     return result;
 }
