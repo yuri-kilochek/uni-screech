@@ -191,6 +191,8 @@ static struct super_operations s_op = {
 };
 
 static void load_reg_content(struct file *container, struct dentry *dentry, loff_t *offset) {
+    struct fs_data *fs_data = dentry->d_sb->s_fs_info;
+
     struct inode *inode = dentry->d_inode;
 
     char cache_path[CACHE_PATH_SIZE];
@@ -203,7 +205,7 @@ static void load_reg_content(struct file *container, struct dentry *dentry, loff
     }
 
     uint32_t cache_size;
-    vfs_read_to_kernel(container, (char *)&cache_size, sizeof(cache_size), offset);
+    vfs_read_to_kernel_decrypted(container, (char *)&cache_size, sizeof(cache_size), offset, fs_data->crypt_key);
 
     loff_t cache_offset = 0;
     while (cache_offset < cache_size) {
@@ -212,7 +214,7 @@ static void load_reg_content(struct file *container, struct dentry *dentry, loff
         if (amount_to_read > sizeof(buffer)) {
             amount_to_read = sizeof(buffer);
         }
-        ssize_t amount_read = vfs_read_to_kernel(container, buffer, amount_to_read, offset);
+        ssize_t amount_read = vfs_read_to_kernel_decrypted(container, buffer, amount_to_read, offset, fs_data->crypt_key);
         vfs_write_from_kernel(cache, buffer, amount_read, &cache_offset);
     }
 
@@ -221,20 +223,21 @@ static void load_reg_content(struct file *container, struct dentry *dentry, loff
 
 static void load_dir_content(struct file *container, struct dentry *dentry, loff_t *offset) {
     struct super_block *sb = dentry->d_sb;
+    struct fs_data *fs_data = sb->s_fs_info;
 
     uint32_t count;
-    vfs_read_to_kernel(container, (char *)&count, sizeof(count), offset);
+    vfs_read_to_kernel_decrypted(container, (char *)&count, sizeof(count), offset, fs_data->crypt_key);
 
     for (int i = 0; i < count; ++i) {
         uint32_t name_size;
-        vfs_read_to_kernel(container, (char *)&name_size, sizeof(name_size), offset);
+        vfs_read_to_kernel_decrypted(container, (char *)&name_size, sizeof(name_size), offset, fs_data->crypt_key);
 
         char name[name_size + 1];
-        vfs_read_to_kernel(container, name, name_size, offset);
+        vfs_read_to_kernel_decrypted(container, name, name_size, offset, fs_data->crypt_key);
         name[name_size] = '\0';
 
         char type;
-        vfs_read_to_kernel(container, &type, 1, offset);
+        vfs_read_to_kernel_decrypted(container, &type, 1, offset, fs_data->crypt_key);
 
         struct dentry *subdentry = d_alloc_name(dentry, name);
         d_rehash(subdentry);
@@ -255,17 +258,28 @@ static void load_dir_content(struct file *container, struct dentry *dentry, loff
 }
 
 static int load(struct dentry *root) {
-    LOG("load");
-
     struct fs_data *fs_data = root->d_sb->s_fs_info;
 
     struct file *container = filp_open(fs_data->container_path, O_RDONLY, 0000);
     if (IS_ERR(container)) {
-        LOG("load file_open(fs_data->container_path, O_RDONLY, 0000) failed");
+        if (PTR_ERR(container) == -ENOENT) {
+            return 0;
+        }
+        LOG("Unable to open container");
         return PTR_ERR(container);
     }
 
-    load_dir_content(container, root, &(loff_t){0});
+    loff_t offset = 0;
+
+    uint32_t magic;
+    vfs_read_to_kernel_decrypted(container, (char *)&magic, sizeof(magic), &offset, fs_data->crypt_key);
+    if (magic != MAGIC) {
+        LOG("Container is not valid");
+        filp_close(container, NULL);
+        return -EINVAL;
+    }
+
+    load_dir_content(container, root, &offset);
 
     filp_close(container, NULL);
 
@@ -273,6 +287,8 @@ static int load(struct dentry *root) {
 }
 
 static void save_reg_content(struct file *container, struct dentry *dentry, loff_t *offset) {
+    struct fs_data *fs_data = dentry->d_sb->s_fs_info;
+
     struct inode *inode = dentry->d_inode;
 
     char cache_path[CACHE_PATH_SIZE];
@@ -285,20 +301,20 @@ static void save_reg_content(struct file *container, struct dentry *dentry, loff
     }
 
     uint32_t cache_size = vfs_llseek(cache, 0, SEEK_END);
-    vfs_write_from_kernel(container, (char const *)&cache_size, sizeof(cache_size), offset);
+    vfs_write_from_kernel_encrypted(container, (char const *)&cache_size, sizeof(cache_size), offset, fs_data->crypt_key);
 
     loff_t cache_offset = 0;
     while (cache_offset < cache_size) {
         char buffer[1024];
         ssize_t amount_read = vfs_read_to_kernel(cache, buffer, sizeof(buffer), &cache_offset);
-        vfs_write_from_kernel(container, buffer, amount_read, offset);
+        vfs_write_from_kernel_encrypted(container, buffer, amount_read, offset, fs_data->crypt_key);
     }
 
     filp_close(cache, NULL);
 }
 
 static void save_dir_content(struct file *container, struct dentry *dentry, loff_t *offset) {
-    LOG("save_dir_content");
+    struct fs_data *fs_data = dentry->d_sb->s_fs_info;
 
     struct dentry *subdentry;
 
@@ -306,22 +322,22 @@ static void save_dir_content(struct file *container, struct dentry *dentry, loff
     list_for_each_entry(subdentry, &dentry->d_subdirs, d_u.d_child) {
         ++count;
     }
-    vfs_write_from_kernel(container, (char const *)&count, sizeof(count), offset);
+    vfs_write_from_kernel_encrypted(container, (char const *)&count, sizeof(count), offset, fs_data->crypt_key);
 
     list_for_each_entry(subdentry, &dentry->d_subdirs, d_u.d_child) {
         uint32_t name_size = subdentry->d_name.len;
-        vfs_write_from_kernel(container, (char const*)&name_size, sizeof(name_size), offset);
+        vfs_write_from_kernel_encrypted(container, (char const*)&name_size, sizeof(name_size), offset, fs_data->crypt_key);
 
         char const* name = subdentry->d_name.name;
-        vfs_write_from_kernel(container, name, name_size, offset);
+        vfs_write_from_kernel_encrypted(container, name, name_size, offset, fs_data->crypt_key);
 
         switch (subdentry->d_inode->i_mode & S_IFMT) {
             case S_IFREG:
-                vfs_write_from_kernel(container, &(char){'R'}, 1, offset);
+                vfs_write_from_kernel_encrypted(container, &(char){'R'}, 1, offset, fs_data->crypt_key);
                 save_reg_content(container, subdentry, offset);
                 break;
             case S_IFDIR:
-                vfs_write_from_kernel(container, &(char){'D'}, 1, offset);
+                vfs_write_from_kernel_encrypted(container, &(char){'D'}, 1, offset, fs_data->crypt_key);
                 save_dir_content(container, subdentry, offset);
                 break;
         };
@@ -329,17 +345,20 @@ static void save_dir_content(struct file *container, struct dentry *dentry, loff
 }
 
 static int save(struct dentry *root) {
-    LOG("save");
-
     struct fs_data *fs_data = root->d_sb->s_fs_info;
 
     struct file *container = filp_open(fs_data->container_path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (IS_ERR(container)) {
-        LOG("save filp_open(fs_data->container_path, O_CREAT | O_TRUNC | O_WRONLY, 0644) failed");
+        LOG("Unable to open container");
         return PTR_ERR(container);
     }
 
-    save_dir_content(container, root, &(loff_t){0});
+    loff_t offset = 0;
+
+    uint32_t magic = MAGIC;
+    vfs_write_from_kernel_encrypted(container, (char const *)&magic, sizeof(magic), &offset, fs_data->crypt_key);
+
+    save_dir_content(container, root, &offset);
 
     filp_close(container, NULL);
 
@@ -365,9 +384,13 @@ static int fill_super(struct super_block *sb, void *data, int silent) {
         return -ENOMEM;
     }
 
-    load(sb->s_root);
+    int error = load(sb->s_root);
 
-    return 0;
+    if (error) {
+        sb->s_fs_info = NULL;
+    }
+
+    return error;
 }
 
 static struct dentry *mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *options) {
@@ -420,9 +443,12 @@ failure:
 }
 
 static void kill_sb(struct super_block *sb) {
-    save(sb->s_root);
-
     struct fs_data *fs_data = sb->s_fs_info;
+    if (!fs_data) {
+        return;
+    }
+
+    save(sb->s_root);
 
     kfree(fs_data->container_path);
     kfree(fs_data->crypt_key);
