@@ -2,12 +2,10 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/fs.h>
 #include <linux/dcache.h>
 #include <linux/namei.h>
-#include <linux/backing-dev.h>
 
 #include "kernel_read_write.h"
 
