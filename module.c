@@ -254,14 +254,14 @@ static void load_dir_content(struct file *container, struct dentry *dentry, loff
     }
 }
 
-static int unpack(struct dentry *root) {
-    LOG("unpack");
+static int load(struct dentry *root) {
+    LOG("load");
 
     struct fs_data *fs_data = root->d_sb->s_fs_info;
 
     struct file *container = filp_open(fs_data->container_path, O_RDONLY, 0000);
     if (IS_ERR(container)) {
-        LOG("unpack file_open(fs_data->container_path, O_RDONLY, 0000) failed");
+        LOG("load file_open(fs_data->container_path, O_RDONLY, 0000) failed");
         return PTR_ERR(container);
     }
 
@@ -328,14 +328,14 @@ static void save_dir_content(struct file *container, struct dentry *dentry, loff
     }
 }
 
-static int repack(struct dentry *root) {
-    LOG("repack");
+static int save(struct dentry *root) {
+    LOG("save");
 
     struct fs_data *fs_data = root->d_sb->s_fs_info;
 
     struct file *container = filp_open(fs_data->container_path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (IS_ERR(container)) {
-        LOG("repack filp_open(fs_data->container_path, O_CREAT | O_TRUNC | O_WRONLY, 0644) failed");
+        LOG("save filp_open(fs_data->container_path, O_CREAT | O_TRUNC | O_WRONLY, 0644) failed");
         return PTR_ERR(container);
     }
 
@@ -365,7 +365,7 @@ static int fill_super(struct super_block *sb, void *data, int silent) {
         return -ENOMEM;
     }
 
-    unpack(sb->s_root);
+    load(sb->s_root);
 
     return 0;
 }
@@ -420,7 +420,7 @@ failure:
 }
 
 static void kill_sb(struct super_block *sb) {
-    repack(sb->s_root);
+    save(sb->s_root);
 
     struct fs_data *fs_data = sb->s_fs_info;
 
