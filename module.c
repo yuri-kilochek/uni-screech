@@ -190,30 +190,141 @@ static struct super_operations s_op = {
     .drop_inode = drop_inode,
 };
 
-static void unpack(struct dentry *root) {
-    LOG("unpack");
+static void load_reg_content(struct file *container, struct dentry *dentry, loff_t *offset) {
+    struct inode *inode = dentry->d_inode;
 
-    struct super_block *sb = root->d_inode->i_sb;
+    char cache_path[CACHE_PATH_SIZE];
+    make_cache_path(cache_path, inode->i_ino);
 
-    struct dentry *a = d_alloc_name(root, "a"); d_rehash(a); make_inode(sb, root->d_inode, a, S_IFDIR | 0755); dput(a);
-        struct dentry *a_1 = d_alloc_name(a, "1"); d_rehash(a_1); make_inode(sb, a->d_inode, a_1, S_IFREG | 0644); dput(a_1);
-        struct dentry *a_2 = d_alloc_name(a, "2"); d_rehash(a_2); make_inode(sb, a->d_inode, a_2, S_IFREG | 0644); dput(a_2);
-    struct dentry *b = d_alloc_name(root, "b"); d_rehash(b); make_inode(sb, root->d_inode, b, S_IFDIR | 0755); dput(b);
-        struct dentry *b_3 = d_alloc_name(b, "3"); d_rehash(b_3); make_inode(sb, b->d_inode, b_3, S_IFREG | 0644); dput(b_3);
-        struct dentry *b_4 = d_alloc_name(b, "4"); d_rehash(b_4); make_inode(sb, b->d_inode, b_4, S_IFREG | 0644); dput(b_4);
+    struct file* cache = filp_open(cache_path, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    if (IS_ERR(cache)) {
+        LOG("save_reg_content filp_open(cache_path, O_CREAT | O_TRUNC | O_WRONLY, 0600) failed");
+        return;
+    }
+
+    uint32_t cache_size;
+    vfs_read_to_kernel(container, (char *)&cache_size, sizeof(cache_size), offset);
+
+    loff_t cache_offset = 0;
+    while (cache_offset < cache_size) {
+        char buffer[1024];
+        loff_t amount_to_read = cache_size - cache_offset;
+        if (amount_to_read > sizeof(buffer)) {
+            amount_to_read = sizeof(buffer);
+        }
+        ssize_t amount_read = vfs_read_to_kernel(container, buffer, amount_to_read, offset);
+        vfs_write_from_kernel(cache, buffer, amount_read, &cache_offset);
+    }
+
+    filp_close(cache, NULL);
 }
 
-static void save(struct file *container, struct dentry *dentry, loff_t *offset) {
-    offset = offset ? offset : &(loff_t){0};
+static void load_dir_content(struct file *container, struct dentry *dentry, loff_t *offset) {
+    struct super_block *sb = dentry->d_sb;
 
-    struct qstr *name = &dentry->d_name;
-    vfs_write_from_kernel(container, name->name, name->len, offset);
-    vfs_write_from_kernel(container, "\n", strlen("\n"), offset);
+    uint32_t count;
+    vfs_read_to_kernel(container, (char *)&count, sizeof(count), offset);
 
-    struct list_head *i;
-    list_for_each(i, &dentry->d_subdirs) {
-        struct dentry *subdentry = list_entry(i, struct dentry, d_u.d_child);
-        save(container, subdentry, offset);
+    for (int i = 0; i < count; ++i) {
+        uint32_t name_size;
+        vfs_read_to_kernel(container, (char *)&name_size, sizeof(name_size), offset);
+
+        char name[name_size + 1];
+        vfs_read_to_kernel(container, name, name_size, offset);
+        name[name_size] = '\0';
+
+        char type;
+        vfs_read_to_kernel(container, &type, 1, offset);
+
+        struct dentry *subdentry = d_alloc_name(dentry, name);
+        d_rehash(subdentry);
+
+        switch (type) {
+            case 'R':
+                make_inode(sb, dentry->d_inode, subdentry, S_IFREG | 0644);
+                load_reg_content(container, subdentry, offset);
+                break;
+            case 'D':
+                make_inode(sb, dentry->d_inode, subdentry, S_IFDIR | 0755);
+                load_dir_content(container, subdentry, offset);
+                break;
+        }
+
+        dput(subdentry);
+    }
+}
+
+static int unpack(struct dentry *root) {
+    LOG("unpack");
+
+    struct fs_data *fs_data = root->d_sb->s_fs_info;
+
+    struct file *container = filp_open(fs_data->container_path, O_RDONLY, 0000);
+    if (IS_ERR(container)) {
+        LOG("unpack file_open(fs_data->container_path, O_RDONLY, 0000) failed");
+        return PTR_ERR(container);
+    }
+
+    load_dir_content(container, root, &(loff_t){0});
+
+    filp_close(container, NULL);
+
+    return 0;
+}
+
+static void save_reg_content(struct file *container, struct dentry *dentry, loff_t *offset) {
+    struct inode *inode = dentry->d_inode;
+
+    char cache_path[CACHE_PATH_SIZE];
+    make_cache_path(cache_path, inode->i_ino);
+
+    struct file* cache = filp_open(cache_path, O_CREAT | O_RDONLY, 0600);
+    if (IS_ERR(cache)) {
+        LOG("save_reg_content filp_open(cache_path, O_CREAT | O_RDONLY, 0600) failed");
+        return;
+    }
+
+    uint32_t cache_size = vfs_llseek(cache, 0, SEEK_END);
+    vfs_write_from_kernel(container, (char const *)&cache_size, sizeof(cache_size), offset);
+
+    loff_t cache_offset = 0;
+    while (cache_offset < cache_size) {
+        char buffer[1024];
+        ssize_t amount_read = vfs_read_to_kernel(cache, buffer, sizeof(buffer), &cache_offset);
+        vfs_write_from_kernel(container, buffer, amount_read, offset);
+    }
+
+    filp_close(cache, NULL);
+}
+
+static void save_dir_content(struct file *container, struct dentry *dentry, loff_t *offset) {
+    LOG("save_dir_content");
+
+    struct dentry *subdentry;
+
+    uint32_t count = 0;
+    list_for_each_entry(subdentry, &dentry->d_subdirs, d_u.d_child) {
+        ++count;
+    }
+    vfs_write_from_kernel(container, (char const *)&count, sizeof(count), offset);
+
+    list_for_each_entry(subdentry, &dentry->d_subdirs, d_u.d_child) {
+        uint32_t name_size = subdentry->d_name.len;
+        vfs_write_from_kernel(container, (char const*)&name_size, sizeof(name_size), offset);
+
+        char const* name = subdentry->d_name.name;
+        vfs_write_from_kernel(container, name, name_size, offset);
+
+        switch (subdentry->d_inode->i_mode & S_IFMT) {
+            case S_IFREG:
+                vfs_write_from_kernel(container, &(char){'R'}, 1, offset);
+                save_reg_content(container, subdentry, offset);
+                break;
+            case S_IFDIR:
+                vfs_write_from_kernel(container, &(char){'D'}, 1, offset);
+                save_dir_content(container, subdentry, offset);
+                break;
+        };
     }
 }
 
@@ -222,13 +333,13 @@ static int repack(struct dentry *root) {
 
     struct fs_data *fs_data = root->d_sb->s_fs_info;
 
-    struct file *container = filp_open(fs_data->container_path, O_WRONLY | O_TRUNC, 0000);
+    struct file *container = filp_open(fs_data->container_path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (IS_ERR(container)) {
-        LOG("repack file_open(fs_data->container_path, O_WRONLY | O_TRUNC, 0000) failed");
+        LOG("repack filp_open(fs_data->container_path, O_CREAT | O_TRUNC | O_WRONLY, 0644) failed");
         return PTR_ERR(container);
     }
 
-    save(container, root, NULL);
+    save_dir_content(container, root, &(loff_t){0});
 
     filp_close(container, NULL);
 
