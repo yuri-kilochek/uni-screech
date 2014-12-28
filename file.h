@@ -3,10 +3,8 @@
 
 #include <linux/fs.h>
 
-struct file *file_open(char const *path, int flags, int rights);
-ssize_t file_read(struct file *file, char __user *buffer, size_t size, loff_t *offset);
-ssize_t file_write(struct file *file, const char __user *buffer, size_t size, loff_t *offset);
-int file_close(struct file *file);
+ssize_t vfs_read_to_kernel(struct file *file, char *buffer, size_t size, loff_t *offset);
+ssize_t vfs_write_from_kernel(struct file *file, const char *buffer, size_t size, loff_t *offset);
 
 #endif
 

@@ -41,11 +41,8 @@ static int open(struct inode *inode, struct file *file) {
     char cache_path[CACHE_PATH_SIZE];
     make_cache_path(cache_path, inode->i_ino);
 
-    LOG("open file->f_flags %o", file->f_flags);
-
-    file->private_data = file_open(cache_path, file->f_flags, 0600);
+    file->private_data = filp_open(cache_path, file->f_flags, 0600);
     if (IS_ERR(file->private_data)) {
-        LOG("open file_open(cache_path, file->f_flags, 0600) failed");
         return PTR_ERR(file->private_data);
     }
 
@@ -69,7 +66,7 @@ static ssize_t write(struct file *file, const char __user *buffer, size_t size, 
 
 static int release(struct inode *inode, struct file *file) {
     LOG("release %s", file->f_dentry->d_name.name);
-    return file_close(file->private_data);
+    return filp_close(file->private_data, NULL);
 }
 
 static struct file_operations reg_op = {
@@ -212,8 +209,8 @@ static void save(struct file *container, struct dentry *dentry, loff_t *offset) 
     offset = offset ? offset : &(loff_t){0};
 
     struct qstr *name = &dentry->d_name;
-    file_write(container, name->name, name->len, offset);
-    file_write(container, "\n", strlen("\n"), offset);
+    vfs_write_from_kernel(container, name->name, name->len, offset);
+    vfs_write_from_kernel(container, "\n", strlen("\n"), offset);
 
     struct list_head *i;
     list_for_each(i, &dentry->d_subdirs) {
@@ -227,7 +224,7 @@ static int repack(struct dentry *root) {
 
     struct fs_data *fs_data = root->d_sb->s_fs_info;
 
-    struct file *container = file_open(fs_data->container_path, O_WRONLY | O_TRUNC, 0000);
+    struct file *container = filp_open(fs_data->container_path, O_WRONLY | O_TRUNC, 0000);
     if (IS_ERR(container)) {
         LOG("repack file_open(fs_data->container_path, O_WRONLY | O_TRUNC, 0000) failed");
         return PTR_ERR(container);
@@ -235,7 +232,7 @@ static int repack(struct dentry *root) {
 
     save(container, root, NULL);
 
-    file_close(container);
+    filp_close(container, NULL);
 
     return 0;
 }
