@@ -1,5 +1,5 @@
-#ifndef FILE_HEADER
-#define FILE_HEADER
+#ifndef KERNEL_READ_WRITE_HEADER
+#define KERNEL_READ_WRITE_HEADER
 
 #include <linux/fs.h>
 
