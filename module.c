@@ -9,7 +9,7 @@
 #include <linux/namei.h>
 #include <linux/backing-dev.h>
 
-#include "file.h"
+#include "kernel_read_write.h"
 
 #define MAGIC 0x5C12EEC8
 
