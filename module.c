@@ -132,10 +132,6 @@ static struct inode *make_inode(struct super_block *sb, struct inode *dir, struc
     return inode;
 }
 
-static int drop_inode(struct inode *inode) {
-    return generic_delete_inode(inode);
-}
-
 static int create(struct inode *dir, struct dentry *dentry, int mode, struct nameidata *nd) {
     LOG("create %s", dentry->d_name.name);
 
@@ -186,8 +182,16 @@ static struct inode_operations dir_iop = {
     .rename = rename,
 };
 
+static int delete_dentry(struct dentry const *dentry) {
+    return 1;
+}
+
+static struct dentry_operations d_op = {
+    .d_delete = delete_dentry,
+};
+
 static struct super_operations s_op = {
-    .drop_inode = drop_inode,
+    .drop_inode = generic_delete_inode,
 };
 
 static void load_reg_content(struct file *container, struct dentry *dentry, loff_t *offset) {
@@ -240,6 +244,7 @@ static void load_dir_content(struct file *container, struct dentry *dentry, loff
         vfs_read_to_kernel_decrypted(container, &type, 1, offset, fs_data->crypt_key);
 
         struct dentry *subdentry = d_alloc_name(dentry, name);
+        d_set_d_op(subdentry, &d_op);
         d_rehash(subdentry);
 
         switch (type) {
@@ -323,8 +328,11 @@ static void save_dir_content(struct file *container, struct dentry *dentry, loff
         ++count;
     }
     vfs_write_from_kernel_encrypted(container, (char const *)&count, sizeof(count), offset, fs_data->crypt_key);
+    LOG("save_dir_content count=%d", (int)count);
 
     list_for_each_entry(subdentry, &dentry->d_subdirs, d_u.d_child) {
+        LOG("save_dir_content %s", subdentry->d_name.name);
+
         uint32_t name_size = subdentry->d_name.len;
         vfs_write_from_kernel_encrypted(container, (char const*)&name_size, sizeof(name_size), offset, fs_data->crypt_key);
 
