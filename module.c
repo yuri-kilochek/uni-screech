@@ -11,7 +11,9 @@
 
 #define MAGIC 0x5C12EEC8
 
-#define LOG(...) printk(KERN_INFO "SCREECH " __VA_ARGS__)
+#define ERROR(...) printk(KERN_ERR "SCREECH " __VA_ARGS__)
+
+#define LOG(...) /* printk(KERN_INFO "SCREECH " __VA_ARGS__) */
 
 #define CACHE_PREFIX "/tmp/screech-cache-"
 
@@ -76,26 +78,6 @@ static struct file_operations reg_op = {
 };
 
 static struct inode_operations reg_iop = {};
-
-//static char *get_path(struct dentry *dentry) {
-//    int len = 256;
-//    for (;;) {
-//        char *buf = kmalloc(len, GFP_KERNEL);
-//        if (!buf)
-//            return ERR_PTR(-ENOMEM);
-//        char *res = dentry ? dentry_path_raw(dentry, buf, len) : strcpy(buf, "/");
-//        if (IS_ERR(res)) {
-//            kfree(buf);
-//            if (PTR_ERR(res) == -ENAMETOOLONG) {
-//                len *= 2;
-//                continue;
-//            }
-//            return res;
-//        }
-//        memmove(buf, res, strlen(res) + 1);
-//        return buf;
-//    }
-//}
 
 static struct inode *make_inode(struct super_block *sb, struct inode *dir, struct dentry *dentry, int mode) {
     struct inode *inode = new_inode(sb);
@@ -204,7 +186,7 @@ static void load_reg_content(struct file *container, struct dentry *dentry, loff
 
     struct file* cache = filp_open(cache_path, O_CREAT | O_TRUNC | O_WRONLY, 0600);
     if (IS_ERR(cache)) {
-        LOG("save_reg_content filp_open(cache_path, O_CREAT | O_TRUNC | O_WRONLY, 0600) failed");
+        ERROR("save_reg_content filp_open(cache_path, O_CREAT | O_TRUNC | O_WRONLY, 0600) failed");
         return;
     }
 
@@ -270,7 +252,7 @@ static int load(struct dentry *root) {
         if (PTR_ERR(container) == -ENOENT) {
             return 0;
         }
-        LOG("Unable to open container");
+        ERROR("Unable to open container");
         return PTR_ERR(container);
     }
 
@@ -279,7 +261,7 @@ static int load(struct dentry *root) {
     uint32_t magic;
     vfs_read_to_kernel_decrypted(container, (char *)&magic, sizeof(magic), &offset, fs_data->crypt_key);
     if (magic != MAGIC) {
-        LOG("Container is not valid");
+        ERROR("Container is not valid");
         filp_close(container, NULL);
         return -EINVAL;
     }
@@ -301,7 +283,7 @@ static void save_reg_content(struct file *container, struct dentry *dentry, loff
 
     struct file* cache = filp_open(cache_path, O_CREAT | O_RDONLY, 0600);
     if (IS_ERR(cache)) {
-        LOG("save_reg_content filp_open(cache_path, O_CREAT | O_RDONLY, 0600) failed");
+        ERROR("save_reg_content filp_open(cache_path, O_CREAT | O_RDONLY, 0600) failed");
         return;
     }
 
@@ -328,11 +310,8 @@ static void save_dir_content(struct file *container, struct dentry *dentry, loff
         ++count;
     }
     vfs_write_from_kernel_encrypted(container, (char const *)&count, sizeof(count), offset, fs_data->crypt_key);
-    LOG("save_dir_content count=%d", (int)count);
 
     list_for_each_entry(subdentry, &dentry->d_subdirs, d_u.d_child) {
-        LOG("save_dir_content %s", subdentry->d_name.name);
-
         uint32_t name_size = subdentry->d_name.len;
         vfs_write_from_kernel_encrypted(container, (char const*)&name_size, sizeof(name_size), offset, fs_data->crypt_key);
 
@@ -357,7 +336,7 @@ static int save(struct dentry *root) {
 
     struct file *container = filp_open(fs_data->container_path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (IS_ERR(container)) {
-        LOG("Unable to open container");
+        ERROR("Unable to open container");
         return PTR_ERR(container);
     }
 
