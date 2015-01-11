@@ -40,7 +40,7 @@ ssize_t vfs_write_from_kernel_encrypted(struct file *file, const char *buffer, s
     ssize_t i = 0;
 
     while (i < size) {
-        char subbuffer[1024];
+        char subbuffer[512];
         ssize_t subsize = size - i;
         if (subsize > sizeof(subbuffer)) {
             subsize = sizeof(subbuffer);

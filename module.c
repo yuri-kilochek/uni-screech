@@ -195,7 +195,7 @@ static void load_reg_content(struct file *container, struct dentry *dentry, loff
 
     loff_t cache_offset = 0;
     while (cache_offset < cache_size) {
-        char buffer[1024];
+        char buffer[512];
         loff_t amount_to_read = cache_size - cache_offset;
         if (amount_to_read > sizeof(buffer)) {
             amount_to_read = sizeof(buffer);
@@ -292,7 +292,7 @@ static void save_reg_content(struct file *container, struct dentry *dentry, loff
 
     loff_t cache_offset = 0;
     while (cache_offset < cache_size) {
-        char buffer[1024];
+        char buffer[512];
         ssize_t amount_read = vfs_read_to_kernel(cache, buffer, sizeof(buffer), &cache_offset);
         vfs_write_from_kernel_encrypted(container, buffer, amount_read, offset, fs_data->crypt_key);
     }
